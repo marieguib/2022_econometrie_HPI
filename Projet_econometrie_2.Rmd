@@ -1,0 +1,409 @@
+---
+title: "Projet_econométrie"
+author: "Marie Guibert - 21901412"
+date: "2022-11-24"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Environnement de travail
+
+```{r warning=FALSE,message=FALSE}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(data.table)
+library(corrplot)
+library(car)
+library(MASS)
+library(qqplotr)
+library(lmtest)
+library(stargazer)
+```
+
+# 1. Définition problématique et présentation de l'équation à estimer
+
+Nous cherchons à expliquer l'Indice de Planète Heureuse sur l'année 2016. Nous avons sélectionné 14 variables explicatives issues de différentes sources. La sélection des individus va se faire naturellement grâce aux jointures des différents fichiers.
+
+# 2. Collecte des données
+
+## Importation des données
+
+Nous avons d'abord importé les données de différentes bases de données puis fusionner selon les clés présentes dans les fichiers. Notre objectif était d'avoir une base de données finale propre et utilisable telle quelle. 
+
+```{r include=FALSE}
+pollution <- read.csv("effets_pollution_air_2017.csv",sep=",",header=T,stringsAsFactors = T)
+head(pollution,2)
+pollution <- pollution[c(1,7)]
+colnames(pollution)<-c('Code',"pollution")
+summary(pollution)
+
+homicides <- read.csv("homicides_intentionnels_2017.csv",header=T, sep=";",skip=1,stringsAsFactors = T)
+head(homicides)
+homicides <- homicides[c(2,5)]
+colnames(homicides)<-c('Code',"homicide")
+summary(homicides)
+
+pop_bidonvilles <- read.csv("population_bidonvilles.csv",sep=";",header=T,stringsAsFactors = T,dec=',',encoding = "utf-8", na="")
+head(pop_bidonvilles,3)
+pop_bidonvilles <- pop_bidonvilles[c(2,5)]
+colnames(pop_bidonvilles)<-c('Code',"bidonvilles")
+summary(pop_bidonvilles)
+
+chomage <- read.csv("taux_chomage_2017.csv",header=T,sep=";",skip=1,stringsAsFactors = T)
+head(chomage)
+chomage <- chomage[c(2,5)]
+colnames(chomage)<-c('Code',"chomage")
+summary(chomage)
+
+idh <- read.csv("idh.csv", sep=";", stringsAsFactors=TRUE,header=T)
+head(idh)
+colnames(idh)<-c('Pays', 'IDH')
+summary(idh)
+
+democratie <- read.csv("indice_dem.csv", sep=";", stringsAsFactors=TRUE,header=T)
+head(democratie)
+democratie<-democratie[c(1,2,4)]
+colnames(democratie)<-c('Pays', 'Code', 'democratie')
+summary(democratie)
+
+
+txparticipationfemme <- read_excel("tauxparticipationfemme.xls")
+head(txparticipationfemme)
+txparticipationfemme<-na.omit(txparticipationfemme)
+txparticipationfemme<-txparticipationfemme[c(2, 3)]
+txparticipationfemme<-na.omit(txparticipationfemme)
+colnames(txparticipationfemme)<-c('Code', 'part_f')
+txparticipationfemme$Code<-as.factor(txparticipationfemme$Code)
+summary(txparticipationfemme)
+
+txparticipationhomme <- read_excel("tauxparticipationhomme.xls")
+head(txparticipationhomme)
+txparticipationhomme<-txparticipationhomme[c(2, 3)]
+txparticipationhomme<-na.omit(txparticipationhomme)
+colnames(txparticipationhomme)<-c('Code', 'part_h')
+txparticipationhomme$Code<-as.factor(txparticipationhomme$Code)
+summary(txparticipationhomme)
+
+avortement <- read_excel("avortement.xlsx")
+head(avortement)
+avortement_autorise <- avortement[c(2:3)]
+avortement_sous_conditions <- avortement[c(2,4)]
+colnames(avortement_sous_conditions)<- c("Code", "avortement_sous_conditions")
+
+donnees <- read.csv2("HPI.csv", stringsAsFactors=TRUE,header=T)
+HPI <- donnees[c(1,5)]
+pop <- donnees[c(1,2)]
+esperance <- donnees[c(1,3)]
+empreinte_eco <- donnees[c(1,4)]
+pib_hab <- donnees[c(1,6)]
+```
+
+## Création de la base de données
+
+Cette étape nous permet de fusionner les bases de données et d'exporter notre base en format csv pour la suite de notre étude.
+
+```{r include=FALSE}
+# Fusion des fichiers de données
+data_list <- list(HPI, pollution, homicides, pop_bidonvilles, chomage, democratie, txparticipationfemme, txparticipationhomme, pop, esperance, empreinte_eco, pib_hab,avortement_autorise,avortement_sous_conditions) 
+
+# boucle pour ajouter les fichiers dans notre base grâce à la clé "Code"
+modele <- data.frame(homicides[1])
+for (l in data_list){
+  fichier <- l
+  modele <- merge(modele, fichier, by='Code', all=TRUE)
+}
+# fusion des autres fichiers grâce à la clé "Pays"
+modele <- merge(modele, idh, by="Pays")
+
+# Supression des valeurs manquantes : facile l'étude
+modele <- na.omit(modele)
+modele
+
+# Transformation des variables avortement en facteur
+modele$avortement_autorise <- factor(modele$avortement_autorise, labels= c(0,1))
+modele$avortement_sous_conditions <- factor(modele$avortement_sous_conditions, labels=c(0,1))
+
+# Exportation de la base de données au format CSV
+write.csv(modele, "projet_econometrie.csv")
+```
+
+```{r}
+modele <- read_excel("fichier_donnees.xlsx",sheet=1)
+summary(modele)
+```
+
+# 3. Description des données 
+
+## Résumé statistique 
+```{r}
+stargazer(modele,type="text",title="Résumé des données",out="resume_donnnees.txt")
+summary(modele[c(15, 16)])
+```
+Ce résumé statistique nous présente les principaux résultats concernant nos variables. Nous pouvons observer que notre échantillon est composé de 57 pays.
+
+## Statistiques descriptives : graphiques
+
+Nous avons réalisé des statistiques descriptives sur de nombreuses variables pour pouvoir choisir les plus pertinentes par la suite.
+
+```{r}
+ggplot(data=modele, aes(x=pollution)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)+
+  labs(title="Effet de la pollution de l'air",x="Mortalité pour 1 000 000 d'habitants")+
+  theme(plot.title = element_text(hjust=0.5))+
+  coord_flip()
+```
+
+L'ensemble des pays étudiés présentent un effet de la pollution de l'air sur la population. Cependant, pour certains cas, les maladies et problèmes de santé liés à cette pollution sont plus importants. Ce boxplot nous permet de voir la distribution de cet effet. On peut
+observer une médiane assez faible, d'environ 730 décès pour 1 million d'habitants. Cependant, la dispersion dans le dernier quartile est très importante.
+
+```{r}
+homi <- ggplot(data=modele, aes(x=homicide)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)+
+  labs(title="Taux d'homicides intentionnels par pays",x="Homicides intentionnels")+
+  theme(plot.title = element_text(hjust=0.5))+
+  coord_flip()
+```
+
+En ce qui concerne le taux d'homicides intentionnels par pays, nous
+pouvons observer une tendance légèrement plus marquée. En effet ces taux sont d'avantages concentrés autour de la médiane, valant environ 9 pour 100 000 personnes. Nous pouvons tout de même observer des valeurs aberrantes pour certains pays comme le Guatemala, la Jamaïque, les Salvadors ou le Venezuela.
+
+```{r}
+ggplot(data=modele, aes(x=bidonvilles)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)+
+  labs(title="Pourcentage de la population vivant dans des bidonvilles",x="Pourcentage de la population urbaine")+
+  theme(plot.title = element_text(hjust=0.5))+
+  coord_flip()
+```
+
+La distribution de la variable bidonvilles est très hétérogène. Aucune tendance n'est vraiment marquée, toutefois, nous observons une disparité très importante entre les pays. Au sein de notre de base de données, nous avons des pays avec des niveaux de développement différents. C'est pourquoi ce graphique nous montre une médiane assez élévée. En effet, en moyenne, plus de 20% de la population urbaine vit dans des bidonvilles dans les pays de notre étude.
+
+```{r}
+ggplot(data=modele, aes(x=chomage)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)+
+  labs(title="Taux de chômage par pays",x="Taux de chômage")+
+  theme(plot.title = element_text(hjust=0.5))+
+  coord_flip()
+```
+
+La majorité des pays voit a un taux de chômage comprix entre 0 et 10%.
+Nous observons tout de même quelques valeurs aberrantes présentant un taux de chômage particulièrement élevé. En effet, celui-ci peut grimper jusqu'à plus de 25%.
+
+```{r}
+ggplot(data=modele, aes(x=IDH)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)+
+  labs(title="Indice de développement humain",x="Indice de développement humain")+
+  theme(plot.title = element_text(hjust=0.5))+
+  coord_flip()
+```
+
+Ce graphique nous présente la concentration de la variable d'indice de développement humain. Les pays étudiés montre une forte hétérogénéité en termes de développement. En effet, nous pouvons observer un premier quartile assez dense. De plus, nous observons une valeur atypique, avec un indice de développement humain proche de 0.
+
+```{r}
+ggplot(data=modele, aes(x=democratie)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)+
+  labs(title="DIstribution de l'indice de démocratie",x="Indice de démocratie")+
+  theme(plot.title = element_text(hjust=0.5))+
+  coord_flip()
+```
+
+Ce graphique nous permet de faire la même conclusion. En effet, l'indice de démocratie est assez hétérogène selon les pays et nous avons toujours une valeur atypique.
+
+```{r}
+f <- ggplot(data=modele, aes(x=part_f)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)+
+  labs(title="Participation à la vie active \n des femmes")+
+  coord_flip()
+
+h <- ggplot(data=modele, aes(x=part_h)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)+
+  labs(title="Participation à la vie active \ndes hommes")+
+  coord_flip()
+
+grid.arrange(f, h, ncol=2)
+```
+
+Ces graphiques nous permettent de confronter la participation des femmes à la vie active par rapport à celle des hommes. La médiane est largement plus élevée pour les hommes que pour les femmes. En effet, plus de 50% des pays ont un taux de participation de 75% à la vie active pour les hommes alors qu'il est seulement d'environ 48% pour les femmes. De plus, nous observons beaucoup plus de valeurs aberrantes pour les femmes, traduisant des inégalités dans certains pays.
+
+```{r}
+popu <- ggplot(data=modele, aes(x=pop)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)+
+  labs(title="Distribution de la population",x="Population (en milliers)")+
+  theme(plot.title = element_text(hjust=0.5))+
+  coord_flip()
+```
+
+Ce graphique nous présente la ditribution de la variable population, nous pouvons observer une très grande variabilité du fait de 
+l'hétérogénité de nos individus. 
+
+```{r}
+espe <- ggplot(data=modele, aes(x=esperance)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4)+
+  labs(title="Distribution de l'esperance de vie",x="Espérance de vie")+
+  theme(plot.title = element_text(hjust=0.5))+
+  coord_flip()
+```
+
+Sur ce graphique nous pouvons observer la concentration de la variable espérance de vie autour de 75 ans. Cependant nous observons tout de même de nombreuses valeurs atypiques inférieures à 65 ans.
+
+```{r}
+grid.arrange(homi, popu,espe, ncol=3)
+```
+
+```{r}
+tab_explication <- data.frame(matrix(0,ncol=2,nrow=2),row.names=c("Non","Oui"))
+colnames(tab_explication) <- c("Non","Oui")
+tab_explication$Non <- c("Interdit","Totalement autorisé")
+tab_explication$Oui <- c("Autorisé sous-conditions","-")
+knitr::kable(tab_explication)
+
+tab <- table(modele[c(15,16)])/nrow(modele)
+knitr::kable(tab, row.names(c(0, 1)), col.names = c(0,1), caption = "Tableau de fréquence des conditons d'autorisation de l'avortement")
+```
+
+Ce tableau de fréquence nous permet de faire apparaître les effectifs de chacune des modalités de nos variables indicatrices. Nous pouvons alors observer une majorité de pays autorisant l'avortement sans condition, 27 au total ce qui représente 47% de nos individus. 26% l'autorisent sous condition et 26% l'interdisent totalement. Nous avons donc au sein de notre modèle des pays ayant des moeurs différents ainsi qu'une avancé du droit des femmes inégale.
+
+## Matrice de corrélation : corrélations avec la variable dépendante et corrélations entres les variables explicatives
+
+```{r}
+corrplot(cor(modele[-c(1,2,15,16)]),method="circle")
+
+# Après avoir enlevé les variables corrélées
+corrplot(cor(modele[-c(1,2,15,16,17)]),method="circle")
+corrplot(cor(modele[-c(1,2,15,16,17)]),method="number")
+```
+Après avoir réalisé la matrice de corrélation, on observe une forte corrélation avec la variable IDGH. Nous allons donc la supprimer pour continuer l'étude en toute cohérence. Ainsi, nous avons donc 13 variables au lieu de 14.
+
+## Régression sur le modèle initial à 13 variables
+
+```{r}
+reg <- lm(HPI~pollution+homicide+bidonvilles+chomage+democratie+part_f+part_h+pop+esperance+empreinte_eco+PIB_hab+avortement_autorise+avortement_sous_conditions,data=modele)
+
+# Description des résultats 
+stargazer(reg,type="text",title="Résultats de la régression sur le modèle initial à 13 variables explicatives",out="regression1.txt")
+```
+
+## Causalité avec la variable endogène 
+```{r}
+#coef(reg) # affiche les coefficients de la droite
+#residuals(reg) # donne les résidus
+avPlots(reg) # représente les relations de chacune des variables 
+```
+On observe plusieurs individus atypiques dans les nuages de points : 1, 30, 66, 73, 94, 151. Nous allons les identifier dans notre rapport final.
+On observe aucune forme particulière dans les relations entre la variable endogène et les variables explicatives (avPlots). Ce constat nous permet de conclure que nous n'avons pas besoin de transformer nos variables.
+
+# Justifier la spécification du modèle
+```{r}
+# VIF
+vif(reg)
+sqrt(vif(reg))
+
+# Règle de Klein
+cor(modele[-c(1,2,15,16,17)])^2 > summary(reg)$r.squared
+```
+Le VIF nous permet de voir qu'il n'existe pas de multicolinéarité car aucune valeur n'est au-dessus de 10. Le modèle est donc globalement fiable. Dans notre cas, l’écart-type du coefficient de la variable PIB par habitant est 2.87 plus grand qu’il ne le serait si le PIB par habitant n’était pas corrélée aux autres variables de notre modèle. De plus, la Règle de Klein nous permet de conclure qu'il n'existe pas de problème de colinéarité.
+
+# 4. Estimation du modèle
+
+## Critère de l'AIC
+```{r}
+# estimation du modèle complet 
+modele_complet <- lm(HPI ~ pollution+homicide+bidonvilles+chomage+democratie+part_f+part_h+pop+esperance+empreinte_eco+PIB_hab+avortement_autorise+avortement_sous_conditions, data = modele)
+
+
+# Backward regression model
+modele_backward <- stepAIC(modele_complet, direction = "backward", 
+                      trace = FALSE)
+stargazer(modele_backward,type="text",title="Résultats de la régression du modèle backward")
+
+# forward regression model
+modele_forward <- stepAIC(modele_complet, direction = "forward", 
+                      trace = FALSE)
+stargazer(modele_forward,type="text",title="Résultats de la régression du modèle forward")
+
+# Stepwise regression model
+modele_both <- stepAIC(modele_complet, direction = "both", 
+                      trace = FALSE)
+modele_both$anova
+stargazer(modele_both,type="text",title="Résultats de la régression du modèle stepwise")
+```
+
+On garde le modele stepwise car le R² est plus élevé que le modèle forward. Toutes les variables sont presque significatives. Nous pouvons observer que cette méthode minimise l'AIC.
+
+Le modèle retenu est: HPI~pollution+homicide+chomage+pop+esperance+empreinte_eco+avortement_aut+avortement_cond
+
+```{r}
+# création du dataframe réduit : après l'AIC 
+modele_reduit <- modele[c(3:5,7,11:13,15,16)]
+stargazer(modele_reduit,type="text")
+```
+Nous réalisons un résumé statistique des variables utilisées dans notre modèle après sélection selon le critère de l'AIC.
+
+## Détection hétéroscédasticité
+```{r}
+plot(modele_both)
+stargazer(modele_both,type="text",title="Représentation du modèle choisi",out="modele_both.txt")
+```
+
+Nous avons une distribution aléatoire des résidus, traduisant une relation linéaire du modèle. 
+Le QQplot nous permet de vérifier ou non la normalité des résidus. Le résultat n'étant pas concluant puisque certains points sont éloignés de la droite, nous allons effectuer un test de Shapiro-Wilk. Le graphique "residuals vs fitted" nous permet de montrer s'il y a un problème
+d'hétéroscédasticité. Dans notre cas, les résidus sont concentrés à droite, ce qui peut être synonyme d'hétéroscédasticité.
+
+```{r}
+shapiro.test(residuals(modele_both))
+```
+
+Le test de Shapiro a une p-value de 0.2577 > 0.05. On ne rejette pas H0, les résidus sont normaux.
+
+## Analyse des résidus
+
+```{r}
+residM = residuals(modele_both)
+residM2 = residM^2
+Fitted_Y = fitted(modele_both)
+
+par(mfrow=c(1,2))
+#graphique des résidus
+#détection graphique des résidus
+plot(residM~Fitted_Y, data=modele_reduit, main="héteroscedasticité / Y estimé ?" )
+#OU
+plot(resid(modele_both),fitted(modele_both))
+```
+
+## Test homoscédasticité
+
+L'hypothèse d'homoscédasticité requiert que la variance des termes d'erreur soit la même pour chaque observation.
+
+```{r}
+bptest(modele_both)
+```
+
+Le test de Breush-Pagan utilisé sur le modèle réduit a une p-valeur supérieure à 0.05, ainsi on conserve l'hypothèse nulle selon laquelle nous ne sommes pas en présence d'homoscédasticité.
+
+```{r}
+plot(residM~pollution, data=modele_reduit, main="héteroscedasticité / en fonction de varX ?" )
+
+plot(residM~homicide, data=modele_reduit, main="héteroscedasticité / en fonction de varX ?" )
+
+plot(residM~pop, data=modele_reduit, main="héteroscedasticité / en fonction de varX ?" )
+
+plot(residM~esperance, data=modele_reduit, main="héteroscedasticité / en fonction de varX ?" )
+
+plot(residM~empreinte_eco, data=modele_reduit, main="héteroscedasticité / en fonction de varX ?" )
+
+```
+
+Nous nous sommes tout de même questionnées sur l'influence de certaines variables sur la concentrations des résidus à droite. Pour cela nous avons représenté chacunes des variables en fonction des autres. Nous avons décider d'analyser plus en détaille la variable population à l'aide du test de Goldfen-Quandt.
+
+Test de Goldfen-Quandt
+```{r}
+gqtest(modele_both, order.by = ~homicide+chomage+pop+esperance+empreinte_eco+avortement_autorise+avortement_sous_conditions, data=modele_reduit, fraction=9)
+```
+
+A l'issu de ce test nous observons un problème d'hétéroscédasticité sur la variable population. En effet la pvaleur est inferieur à 0.05 nous rejetons ainsi l'hypothèse d'homoscédasticité. 
+Toute fois ce test ne remet pas en cause les conclusions générales du modèle. 
